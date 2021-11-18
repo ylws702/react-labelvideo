@@ -2,18 +2,19 @@ import React, { useEffect, useRef, useState } from "react";
 import "./App.css";
 import urls from "./urls";
 import {
-  Space,
-  Col,
-  Layout,
-  Row,
-  Slider,
-  Tree,
   Button,
-  Select,
+  Col,
   Divider,
   Input,
-  Table,
+  Layout,
+  notification,
   Popconfirm,
+  Row,
+  Select,
+  Slider,
+  Space,
+  Table,
+  Tree,
 } from "antd";
 import ReactPlayer from "react-player";
 import { BaseReactPlayerProps } from "react-player/base";
@@ -22,28 +23,56 @@ import {
   SliderRangeProps,
   SliderSingleProps,
 } from "antd/lib/slider";
+import { TreeProps } from "antd/lib/tree";
 import {
   DownloadOutlined,
   PlusOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
+import localforage from "localforage";
 interface TreeData {
-  title: string | React.ReactElement;
-  key: string;
-  icon?: React.ReactElement;
   children?: TreeData[];
+  isLeaf: boolean;
+  key: string;
   switcherIcon?: React.ReactElement;
+  title: string | React.ReactElement;
 }
 interface LabelTableData {
-  range: [number, number];
-  label: string;
   key: React.Key;
+  label: string;
+  range: [number, number];
 }
 interface LabelMap {
   [label: string]: string;
 }
 type DirInfo = [path: string, folders: string[], files: string[]];
 const speedTypeNumber = 6;
+const storageKeys = {
+  videoKey: "videoKey",
+  videoPlaybackRate: "videoPlaybackRate",
+};
+
+function fetchWithTimeout(
+  resource: RequestInfo,
+  options: Omit<RequestInit, "signal"> & { timeout?: number }
+) {
+  return new Promise<Response>((resolve, reject) => {
+    const { timeout = 30000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => {
+      controller.abort();
+      reject(new Error("timeout"));
+    }, timeout);
+    fetch(resource, {
+      ...options,
+      signal: controller.signal,
+    }).then((response) => {
+      clearTimeout(id);
+      resolve(response);
+    });
+  });
+}
+
 function App() {
   const videoInitValue = {
     labelTableData: [],
@@ -58,7 +87,10 @@ function App() {
     videoKey: "/",
     videoPlaying: true,
   };
+  const [expandedFileKeys, setExpandedFileKeys] = useState<React.Key[]>([]);
   const [fileData, setFileData] = useState<TreeData[]>([]);
+  const [fileTree, setFileTree] = useState(<div />);
+  const [isFileDataLoading, setIsFileDataLoading] = useState<boolean>(true);
   const [label2Add, setLabel2Add] = useState<string>("");
   const [labelMap, setLabelMap] = useState<LabelMap>({});
   const [labelTableData, setLabelTableData] = useState<LabelTableData[]>(
@@ -99,14 +131,14 @@ function App() {
   };
   const playerRef = useRef<ReactPlayer>(null);
   useEffect(() => {
-    fetch(urls.label, { method: "GET" })
+    fetchWithTimeout(urls.label, { method: "GET" })
       .then((response) => response.json())
       .then((labelMap: LabelMap) => {
         setLabelMap(labelMap);
       });
   }, []);
   useEffect(() => {
-    fetch(urls.files, { method: "GET" })
+    fetchWithTimeout(urls.files, { method: "GET" })
       .then((response) => response.json())
       .then((unorderedFiles: DirInfo[]) => {
         const strSort = (str0: string, str1: string) =>
@@ -127,6 +159,7 @@ function App() {
               title: "Root",
               key: "/",
               children: [],
+              isLeaf: false,
             };
           }
           const path = file[0].split("/").filter(Boolean);
@@ -135,6 +168,7 @@ function App() {
             title: realtivePath[realtivePath.length - 1],
             key: realtivePath.map((x) => "/" + x).join(""),
             children: [],
+            isLeaf: false,
           };
         });
         files.forEach((file, i) => {
@@ -155,13 +189,41 @@ function App() {
             children!.push({
               title: fileName,
               key: treedatas[i].key + "/" + fileName,
+              isLeaf: true,
             })
           );
         });
         const root = treedatas[0];
         return root.children ?? [];
       })
-      .then(setFileData);
+      .then((newFileData) => {
+        localforage
+          .getItem<string>(storageKeys.videoKey)
+          .then((storedVideoKey) => {
+            console.log("storedVideoKey", storedVideoKey);
+            const newExpandedFilesKeys = Array.from(expandedFileKeys);
+            if (storedVideoKey) {
+              setVideoKey(storedVideoKey);
+              if (expandedFileKeys.indexOf(storedVideoKey) === -1) {
+                const getParent = (key: string): string[] => {
+                  return Array.from<string, [string, number]>(key, (v, k) => [
+                    v,
+                    k,
+                  ])
+                    .filter(([v, k]) => v === "/" && k !== 0)
+                    .map(([v, k]) => key.substr(0, k));
+                };
+                newExpandedFilesKeys.push(...getParent(storedVideoKey));
+                setExpandedFileKeys(newExpandedFilesKeys);
+              }
+              onSelect([storedVideoKey], { node: { isLeaf: true } });
+              setIsFileDataLoading(false);
+            }
+          })
+          .then(() => {
+            setFileData(newFileData);
+          });
+      });
   }, []);
 
   const updateLabelTableData = (newLabelTableData: LabelTableData[]) => {
@@ -184,14 +246,23 @@ function App() {
     setLabelTableData(newLabelTableData);
   };
 
-  const onSelect = (selectedKeys: React.Key[], info: any) => {
+  const onSelect = (
+    selectedKeys: React.Key[],
+    info: { node: { isLeaf: boolean } }
+  ) => {
+    if (!info.node.isLeaf) return;
     initValue();
-    const newUrl = urls.video + "?file=" + encodeURIComponent(selectedKeys[0]);
+    const [selectedKey] = selectedKeys;
+    localforage.setItem(storageKeys.videoKey, selectedKey);
+    const newUrl = urls.video + "?file=" + encodeURIComponent(selectedKey);
     setVideoUrl(newUrl);
     setVideoKey(selectedKeys[0]);
-    fetch(urls.videoLabel + "?file=" + encodeURIComponent(selectedKeys[0]), {
-      method: "GET",
-    })
+    fetchWithTimeout(
+      urls.videoLabel + "?file=" + encodeURIComponent(selectedKey),
+      {
+        method: "GET",
+      }
+    )
       .then((response) => response.json())
       .then((json: Omit<LabelTableData, "key">[]) => {
         updateLabelTableData(
@@ -210,8 +281,17 @@ function App() {
   };
   const onSliderChange: SliderRangeProps["onChange"] = (newRange) => {
     const oldRange = sliderRange;
-    playerRef.current?.seekTo(getNewFromRange(newRange, oldRange));
+    const player = playerRef.current;
+    setVideoPlaying(false);
+    if (!player) {
+      return;
+    }
+    player.seekTo(getNewFromRange(newRange, oldRange));
     setSliderRange(newRange);
+  };
+  const changeVideoSpeed: SliderSingleProps["onChange"] = (value) => {
+    setVideoPlaybackRate(Math.pow(2, value));
+    console.log("changeVideoSpeed", value);
   };
   const onPlayerReady: BaseReactPlayerProps["onReady"] = (player) => {
     const videoDuration = player.getDuration();
@@ -224,6 +304,7 @@ function App() {
       setSliderMarks(newSliderMarks);
       setSliderRange([0, videoDuration]);
       setSelectedAll(true);
+      changeVideoSpeed(0);
     }
   };
   const onLabel2AddInputChange: React.ChangeEventHandler<HTMLInputElement> = (
@@ -232,19 +313,42 @@ function App() {
     setLabel2Add(e.target.value);
   };
   const addLabel: React.DOMAttributes<HTMLAnchorElement>["onClick"] = () => {
+    if (!(label2Add.length > 0)) {
+      notification.error({
+        message: "添加预置标注失败",
+        description: "标注为空",
+      });
+      return;
+    }
     const newLabelMap = Object.assign({}, labelMap);
     const pos = label2Add.indexOf(":");
     const description =
       pos === -1 ? "No Description" : label2Add.substr(pos + 1);
     newLabelMap[label2Add.substr(0, pos)] = description;
-    fetch(urls.label, {
+    fetchWithTimeout(urls.label, {
       body: JSON.stringify(Object.assign({}, newLabelMap)),
       method: "PUT",
       headers: { "content-type": "application/json" },
+    }).catch((e: Error) => {
+      const message =
+        e.message === "timeout" ? "连接超时" : "无法保存标注至服务器";
+      notification.error({
+        message,
+        description: "当前标注信息会在刷新后丢失",
+        duration: 8,
+      });
     });
+    setLabel2Add("");
     setLabelMap(newLabelMap);
   };
   const onAddButtonClick: React.MouseEventHandler<HTMLElement> = () => {
+    if (!(selectedLabel.length > 0)) {
+      notification.error({
+        message: "添加标注失败",
+        description: "未选择标注",
+      });
+      return;
+    }
     const newLabelTableData = Array.from(labelTableData).concat({
       range: sliderRange,
       label: selectedLabel,
@@ -259,7 +363,7 @@ function App() {
   };
   const onDeleteVideoLabel = (key: React.Key) => {
     const newLabelTableData = Array.from(labelTableData).filter(
-      (item) => item.key != key
+      (item) => item.key !== key
     );
     updateLabelTableData(newLabelTableData);
     fetch(urls.videoLabel, {
@@ -267,9 +371,6 @@ function App() {
       method: "PUT",
       headers: { "content-type": "application/json" },
     });
-  };
-  const changeVideoSpeed: SliderSingleProps["onChange"] = (value) => {
-    setVideoPlaybackRate(Math.pow(2, value));
   };
   const onSelectedRowChange = (record: LabelTableData) => {
     setSelectedRowKey(record.key);
@@ -291,7 +392,13 @@ function App() {
     <div className="App">
       <Layout>
         <Layout.Sider className="App-sider">
-          <Tree onSelect={onSelect} treeData={fileData} />
+          <Tree.DirectoryTree
+            autoExpandParent={!isFileDataLoading}
+            onSelect={onSelect as TreeProps["onSelect"]}
+            treeData={fileData}
+            // expandedKeys={expandedFileKeys}
+            // selectedKeys={[videoKey]}
+          />
         </Layout.Sider>
         <Layout.Content className="App-content">
           <ReactPlayer
@@ -324,7 +431,6 @@ function App() {
                 icon={<PlusOutlined />}
                 onClick={onAddButtonClick}
               />
-              <Button type="primary" icon={<SaveOutlined />} />
               <Button type="primary" icon={<DownloadOutlined />} />
               <Select
                 style={{ width: 240 }}
@@ -358,7 +464,7 @@ function App() {
                         }}
                         onClick={addLabel}
                       >
-                        <PlusOutlined /> 添加标签
+                        <PlusOutlined /> 添加标注
                       </a>
                     </div>
                   </div>
@@ -387,6 +493,7 @@ function App() {
                 min={-1}
                 max={speedTypeNumber - 2}
                 onChange={changeVideoSpeed}
+                value={Math.log2(videoPlaybackRate)}
               />
             </Space>
           </Row>
