@@ -304,7 +304,6 @@ function App() {
       setSliderMarks(newSliderMarks);
       setSliderRange([0, videoDuration]);
       setSelectedAll(true);
-      changeVideoSpeed(0);
     }
   };
   const onLabel2AddInputChange: React.ChangeEventHandler<HTMLInputElement> = (
