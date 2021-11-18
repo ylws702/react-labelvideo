@@ -286,7 +286,7 @@ function App() {
     if (!player) {
       return;
     }
-    player.seekTo(getNewFromRange(newRange, oldRange));
+    player.seekTo(getNewFromRange(newRange, oldRange), "seconds");
     setSliderRange(newRange);
   };
   const changeVideoSpeed: SliderSingleProps["onChange"] = (value) => {
