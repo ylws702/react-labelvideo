@@ -1,5 +1,5 @@
 from typing import List
-from flask import Flask, Response, request, redirect
+from flask import Flask, Response, request, redirect, make_response
 from flask_cors import CORS
 import os
 import re
@@ -57,10 +57,15 @@ def get_chunk(full_path: str, byte1=None, byte2=None):
 def api_file():
     if request.method == 'GET':
         range_header = request.headers.get('Range', None)
-        file = '.' + request.args.get('file', None)
+        arg_file = request.args.get("file", None)
+        if arg_file is None:
+            return make_response('bad request', 400)
+        file = '.' + arg_file
         byte1, byte2 = 0, None
         if range_header:
             match = re.search(r'(\d+)-(\d*)', range_header)
+            if match is None:
+                return make_response('bad request', 400)
             groups = match.groups()
 
             if groups[0]:
@@ -84,6 +89,8 @@ def time2str(sec: float) -> str:
 
 def str2time(string: str) -> float:
     match = re.match(r'(\d+):(\d\d):(\d\d)\.(\d\d\d)', string)
+    if match is None:
+        raise ValueError('time fromat error')
     h = int(match.group(1))
     m = int(match.group(2))
     s = int(match.group(3))
@@ -108,19 +115,25 @@ def api_label():
 @app.route('/api/videoLabel', methods=['GET', 'PUT'])
 def api_video_label():
     if request.method == 'GET':
-        file = os.path.join(prefix, '.'+request.args.get("file", None))
+        arg_file = request.args.get("file", None)
+        if arg_file is None:
+            return make_response('bad request', 400)
+        file = os.path.join(prefix, '.'+arg_file)
         withoutext, _ = os.path.splitext(file)
         label_file = f'{withoutext}.txt'
         if not os.path.exists(label_file):
             return Response('[]',  mimetype='application/json')
         data = []
-        with open(f'{withoutext}.txt', 'r+') as f:
+        with open(label_file, 'r+') as f:
             while True:
                 a, b, c = [f.readline() for _ in range(3)]
                 if len(a) == 0:
                     break
                 pattern = r'^(\d+:\d\d:\d\d\.\d\d\d) - (\d+:\d\d:\d\d\.\d\d\d)'
                 match = re.match(pattern, b)
+                if match is None:
+                    print(f'label file: {label_file} broken')
+                    break
                 item = {
                     'label': a[:-1],
                     'range': [str2time(match.group(i)) for i in (1, 2)]
@@ -130,6 +143,8 @@ def api_video_label():
 
     if request.method == 'PUT':
         request_json = request.get_json()
+        if request_json is None:
+            return make_response('bad request', 400)
         key: str = request_json['key']
         withoutext, _ = os.path.splitext(os.path.join(prefix, '.'+key))
         data = request_json['data']

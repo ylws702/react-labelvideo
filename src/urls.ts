@@ -1,5 +1,5 @@
-const host = "//localhost:3333";
-// const host = ".";
+// const host = "//localhost:3333";
+const host = ".";
 
 const urls = {
   hello: `${host}/api/hello`,
