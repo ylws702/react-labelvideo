@@ -233,7 +233,7 @@ function App() {
     }
     const sliderRangeMarks = {
       0: "0",
-      [duration]: duration.toString(),
+      [duration]: duration.toFixed(3),
     };
     for (const labelData of newLabelTableData) {
       const [a, b] = labelData.range;
@@ -299,7 +299,7 @@ function App() {
     if (!selectedAll) {
       const newSliderMarks = Object.assign({}, sliderMarks);
       Object.assign(newSliderMarks, {
-        [videoDuration]: videoDuration.toString(),
+        [videoDuration]: videoDuration.toFixed(3),
       });
       setSliderMarks(newSliderMarks);
       setSliderRange([0, videoDuration]);
