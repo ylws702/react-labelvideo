@@ -10,6 +10,15 @@ port = 3333
 prefix = '/home/yz/test/'
 video_exts = frozenset(['.mp4'])
 
+_buildin_open = open
+
+
+def open(file: str, mode: str = 'r'):
+    if not 'b' in mode:
+        return _buildin_open(file, mode, encoding='utf-8')
+    return _buildin_open(file, mode)
+
+
 app = Flask(__name__,
             static_url_path='/',
             static_folder='build')
@@ -54,7 +63,7 @@ def get_chunk(full_path: str, byte1=None, byte2=None):
 
 
 @app.route('/api/video', methods=['GET'])
-def api_file():
+def api_video():
     if request.method == 'GET':
         range_header = request.headers.get('Range', None)
         arg_file = request.args.get("file", None)
